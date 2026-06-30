@@ -3,19 +3,18 @@ import sounddevice as sd
 import pyqtgraph.opengl as gl
 from pyqtgraph.opengl.shaders import ShaderProgram, VertexShader, FragmentShader
 from PyQt6 import QtCore, QtWidgets
-from PyQt6.QtGui import QVector3D
+from PyQt6.QtGui import QPainter, QVector3D, QColor, QFont
 import sys
 import librosa
 import threading
 
-AUDIO_FILEPATH = "music/weird_fishes.mp3"
-STFT_WINDOWSIZE = 512
+AUDIO_FILEPATH = "music/bodysnatchers.mp3"
+STFT_WINDOWSIZE = 1024
 BLOCKSIZE = 2048  
 OVERLAP = 0.5
 HISTORY_CHUNKS = 200 
 DATA_LOCK = threading.Lock()
 
-# chat wrote this idek how this works
 custom_vertex_shader = VertexShader("""
     uniform mat4 u_mvp;
     attribute vec4 a_position;
@@ -32,10 +31,8 @@ custom_fragment_shader = FragmentShader("""
     #endif
     varying float v_height;
     void main() {
-        // Map height bounds dynamically (0.0 to 35.0) to a normalized factor (0.0 to 1.0)
         float norm = clamp(v_height / 35.0, 0.0, 1.0);
         
-        // Dynamic procedural color gradient: Blue (Silence) -> Green -> Red (Peaks)
         float r = smoothstep(0.4, 0.8, norm);
         float g = smoothstep(0.0, 0.5, norm) - smoothstep(0.6, 1.0, norm);
         float b = 1.0 - smoothstep(0.0, 0.4, norm);
@@ -45,6 +42,34 @@ custom_fragment_shader = FragmentShader("""
 """)
 
 audio_height_shader = ShaderProgram('audioHeightShader', [custom_vertex_shader, custom_fragment_shader])
+
+
+class FPSCounter(gl.GLViewWidget):
+    def __init__(self, *args, devicePixelRatio=None, **kwargs):
+        super().__init__(*args, devicePixelRatio=devicePixelRatio, **kwargs)
+        self.frame_count = 0
+        self.fps = 0.
+
+        self.fps_timer = QtCore.QTimer(self)
+        self.fps_timer.timeout.connect(self.calculate_fps)
+        self.fps_timer.start(1000)
+
+    def calculate_fps(self):
+        self.fps = self.frame_count
+        self.frame_count = 0
+        self.update()
+
+    def paintGL(self):
+        super().paintGL()
+        self.frame_count += 1
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QColor(0, 255, 0)) # Green text
+        painter.setFont(QFont('Arial', 14, QFont.Weight.Bold))
+        
+        painter.drawText(15, 30, f"FPS: {self.fps:.1f}")
+        painter.end()
+
 
 class Modeler():
     def __init__(self):
@@ -97,7 +122,8 @@ class Renderer():
     def __init__(self, m: Modeler):
         self.m = m
         self.app = QtWidgets.QApplication(sys.argv)
-        self.w = gl.GLViewWidget()
+        self.w = FPSCounter()
+        self.font = QFont("Helvetica", 10)
         self.axes = gl.GLAxisItem()
         self.axes.setSize(x=500, y=500, z=500)
         self.w.addItem(self.axes)
@@ -122,6 +148,15 @@ class Renderer():
             shader=audio_height_shader, 
             smooth=False
         )
+        
+        # Use this if you want to see the frequency bins, otherwise don't because is eviscerates the frame rate.
+        # for x in self.x:
+        #     text = f"{x:.2f}"
+        #     pos = (x, HISTORY_CHUNKS + 10, 30)
+        #     tick = gl.GLTextItem(pos = pos, text = text, color = (255,255,255, 255))
+        #     tick.setData(font=self.font)
+        #     self.w.addItem(tick)
+        
         self.w.addItem(self.surface)
 
     def start(self):
